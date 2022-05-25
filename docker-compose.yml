@@ -1,0 +1,26 @@
+version: '3'
+	services:
+	  node-bootstrap:
+	    build:
+	      context: src
+	      dockerfile: Dockerfile.local
+	    image: node-bootstrap
+	    container_name: node-shareonsocialnetwork
+	    volumes:
+	      - ./src:/home/api
+	    ports:
+	      - 8126:8126
+	    depends_on:
+	      - mongo
+	  mongo:
+	    image: mongo:latest
+	    container_name: mongodb
+	    volumes:
+	      - mongo-volume:/data/db
+	    environment:
+	      - MONGO_INITDB_ROOT_USERNAME=mongo
+	      - MONGO_INITDB_ROOT_PASSWORD=mongo
+	    ports:
+	      - 27017:27017
+	volumes:
+	  mongo-volume:

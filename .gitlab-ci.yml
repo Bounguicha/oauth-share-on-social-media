@@ -1,0 +1,186 @@
+stages:
+  - build
+  - tests
+  - package
+  - deploy
+
+variables:
+  GCP_REPOSITORY: servicima-back-share-on-social-network
+  GCP_PROJECT: widigital-ci
+  GCP_REGISTRY: eu.gcr.io
+  GCP_CLUSTER: cluster-api
+  GCP_BASE_REPOSITORY: ${GCP_REGISTRY}/${GCP_PROJECT}/${GCP_REPOSITORY}
+  IMAGE_NAME: node:alpine
+  IMAGE_GCLOUD: google/cloud-sdk:alpine
+
+# Environments
+
+.dev: &dev
+  variables:
+    ENV: dev
+
+.valid: &valid
+  variables:
+    ENV: valid
+
+.prod: &prod
+  variables:
+    ENV: prod
+
+# Branches
+
+.develop: &develop
+  only:
+    - develop
+
+.branches: &branches
+  except:
+    - develop
+    - master
+
+.master: &master
+  only:
+    - master
+
+# Misc
+
+.manual: &manual
+  when: manual
+
+# Set version project
+
+.version_branch: &version_branch
+  before_script:
+    - apk update && apk add git
+    - apk update && apk add jq
+    - COMMIT_UPPER_CASE=`git log -1 --pretty=%B | sed 's/ //g; s/\[//g; s/\]//g; s/-//g; y/abcdefghijklmnopqrstuvwxyz/ABCDEFGHIJKLMNOPQRSTUVWXYZ/'`
+    - VERSION=`cat ./src/package.json | jq -r .version`
+    - VERSION=${VERSION}-${COMMIT_UPPER_CASE}-SNAPSHOT
+    - echo ${VERSION}
+
+.version_snapshot: &version_snapshot
+  before_script:
+    - apk update && apk add jq
+    - VERSION=`cat ./src/package.json | jq -r .version`
+    - VERSION=${VERSION}-SNAPSHOT
+    - echo ${VERSION}
+
+.version:  &version
+  before_script:
+    - apk update && apk add jq
+    - VERSION=`cat ./src/package.json | jq -r .version`
+    - echo ${VERSION}
+
+# Stages
+build:
+  stage: build
+  image: ${IMAGE_NAME}
+  script:
+    - cd src && yarn && cd ..
+    - tar czf build.tgz ./src/node_modules
+    - node -v
+  artifacts:
+    paths:
+      - build.tgz
+    expire_in: 1 month
+
+# Test
+tests:
+  stage: tests
+  image: ${IMAGE_NAME}
+  script:
+    - tar -xzf build.tgz ./src/node_modules && rm build.tgz
+    - cd src && yarn test
+
+# Package
+.package_gcp: &package_gcp
+  stage: package
+  image: docker:dind
+  services:
+    - docker:dind
+  variables:
+    DOCKER_DRIVER: overlay
+  dependencies:
+    - build
+  script:
+    # Install CA certs, openssl to https downloads, python for gcloud sdk
+    - apk add --update make ca-certificates openssl python
+    - update-ca-certificates
+    # Write our GCP service account private key into a file
+    - sed -i -e "s/KEY1_GITLAB_CI/${KEY1}/g" ./deploy/widigital-ci.json
+    # Download and install Google Cloud SDK
+    - wget https://dl.google.com/dl/cloudsdk/release/google-cloud-sdk.tar.gz
+    - tar zxvf google-cloud-sdk.tar.gz && ./google-cloud-sdk/install.sh --usage-reporting=false --path-update=true
+    - google-cloud-sdk/bin/gcloud version
+    - google-cloud-sdk/bin/gcloud --quiet components update
+    - google-cloud-sdk/bin/gcloud auth activate-service-account --key-file ./deploy/widigital-ci.json
+    - docker login -u _json_key --password-stdin https://${GCP_REGISTRY} < ./deploy/widigital-ci.json
+    - tar -xzf build.tgz ./src/node_modules && rm build.tgz
+    - docker build -t ${GCP_REPOSITORY} ./src
+    - docker tag ${GCP_REPOSITORY} ${GCP_BASE_REPOSITORY}:${VERSION}
+    - docker push ${GCP_BASE_REPOSITORY}:${VERSION}
+
+package_branches_gcp:
+  <<: *version_branch
+  <<: *package_gcp
+  <<: *branches
+  <<: *manual
+
+package_develop_gcp:
+  <<: *version_snapshot
+  <<: *package_gcp
+  <<: *develop
+
+package_master_gcp:
+  <<: *version
+  <<: *package_gcp
+  <<: *master
+
+# Deploy
+.deploy: &deploy
+  image: ${IMAGE_GCLOUD}
+  stage: deploy
+  script:
+    - sed -i -e "s/KEY1_GITLAB_CI/${KEY1}/g" ./deploy/widigital-ci.json
+    - gcloud --quiet components update
+    - gcloud version
+    - gcloud auth activate-service-account --key-file ./deploy/widigital-ci.json
+    - gcloud container clusters get-credentials ${GCP_CLUSTER} --zone=europe-west1-b --project=${GCP_PROJECT}
+    - gcloud components install kubectl
+    - kubectl version
+    - kubectl get pods
+    - kubectl get service
+    - kubectl get deployment ${GCP_REPOSITORY}-${ENV}
+    - kubectl set image deployment/${GCP_REPOSITORY}-${ENV} ${GCP_REPOSITORY}=${GCP_BASE_REPOSITORY}:${VERSION}
+  environment:
+    name: $ENV
+  except:
+    - schedules
+
+deploy_branches:
+  <<: *version_branch
+  <<: *dev
+  <<: *deploy
+  <<: *branches
+  <<: *manual
+
+deploy_develop:
+  <<: *version_snapshot
+  <<: *dev
+  <<: *deploy
+  <<: *develop
+
+deploy_valid:
+  <<: *version
+  <<: *valid
+  <<: *deploy
+  <<: *master
+  <<: *manual
+
+deploy_prod:
+  <<: *version
+  <<: *prod
+  <<: *deploy
+  <<: *master
+  <<: *manual
+

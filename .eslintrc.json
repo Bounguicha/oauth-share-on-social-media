@@ -1,0 +1,46 @@
+{
+  "plugins": ["node", "prettier", "security"],
+  "extends": [
+    "eslint:recommended",
+    "plugin:node/recommended",
+    "airbnb",
+    "prettier",
+    "plugin:security/recommended"
+  ],
+  "parserOptions": {
+    "ecmaVersion": 2018,
+    "sourceType": "module"
+  },
+  "env": {
+    "es6": true,
+    "node": true
+  },
+  "rules": {
+    "import/no-extraneous-dependencies": ["error", {"devDependencies": true}],
+    "prettier/prettier": ["error"],
+    "node/exports-style": ["error", "module.exports"],
+    "node/no-unpublished-require": 0,
+    "node/no-missing-require": ["error"],
+    "no-underscore-dangle": 0,
+    "function-paren-newline": 0,
+    "object-curly-newline": [
+      "error",
+      {
+        "multiline": true,
+        "consistent": true
+      }
+    ],
+    "security/detect-non-literal-fs-filename": "off"
+  },
+  "globals": {
+    "afterEach": false,
+    "beforeEach": false,
+    "afterAll": false,
+    "beforeAll": false,
+    "describe": false,
+    "it": false,
+    "expect": false,
+    "assert": false,
+    "jest": false
+  }
+}
